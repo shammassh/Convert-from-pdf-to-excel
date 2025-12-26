@@ -127,11 +127,12 @@ def write_to_excel(pdf_data, excel_path):
                 wb = openpyxl.load_workbook(excel_path)
                 ws = wb.active
                 
-                # Collect existing filenames to prevent duplicates
-                for row in range(2, ws.max_row + 1):
-                    filename = ws[f'A{row}'].value
-                    if filename:
-                        existing_files.add(filename)
+                # Collect existing filenames by iterating only through cells with values
+                # This completely ignores empty/deleted rows
+                for row in ws.iter_rows(min_row=2, min_col=1, max_col=1):
+                    cell_value = row[0].value
+                    if cell_value and str(cell_value).strip():
+                        existing_files.add(cell_value)
                 
             except PermissionError:
                 print(f"\n❌ ERROR: Cannot open '{excel_path}'")
@@ -347,7 +348,20 @@ class PDFtoExcelApp(tk.Tk):
             padx=15,
             pady=5
         )
-        refresh_btn.pack(side="left")
+        refresh_btn.pack(side="left", padx=(0, 10))
+        
+        clear_btn = tk.Button(
+            sheet_frame,
+            text="Clear Sheet Data",
+            command=self.clear_sheet_data,
+            font=("Arial", 10),
+            bg="#e74c3c",
+            fg="white",
+            cursor="hand2",
+            padx=15,
+            pady=5
+        )
+        clear_btn.pack(side="left")
         
         # Progress frame
         self.progress_frame = tk.LabelFrame(
@@ -435,7 +449,58 @@ class PDFtoExcelApp(tk.Tk):
             self.sheet_combo['values'] = self.available_sheets
             self.sheet_combo.current(0)
             
+    def clear_sheet_data(self):
+        """Clear all data from the selected sheet (keeps headers)"""
+        excel_path = self.excel_path.get()
+        sheet_name = self.sheet_name.get()
+        
+        if not excel_path:
+            messagebox.showwarning("Warning", "Please select an Excel file first!")
+            return
+        
+        if not sheet_name or sheet_name == "Select a sheet or create new..." or sheet_name == "[Create New Sheet]":
+            messagebox.showwarning("Warning", "Please select a sheet to clear!")
+            return
+        
+        if not os.path.exists(excel_path):
+            messagebox.showwarning("Warning", "Excel file does not exist yet!")
+            return
+        
+        # Confirm action
+        confirm = messagebox.askyesno(
+            "Confirm Clear",
+            f"Are you sure you want to clear all data from sheet '{sheet_name}'?\n\nThis will keep the headers but remove all entries."
+        )
+        
+        if not confirm:
+            return
+        
+        try:
+            wb = openpyxl.load_workbook(excel_path)
+            if sheet_name not in wb.sheetnames:
+                messagebox.showerror("Error", f"Sheet '{sheet_name}' not found!")
+                wb.close()
+                return
+            
+            ws = wb[sheet_name]
+            
+            # Delete all rows except the header (row 1)
+            if ws.max_row > 1:
+                ws.delete_rows(2, ws.max_row)
+            
+            wb.save(excel_path)
+            wb.close()
+            
+            messagebox.showinfo("Success", f"Sheet '{sheet_name}' has been cleared!")
+            self.log_message(f"\n✓ Cleared all data from sheet '{sheet_name}'")
+            
+        except PermissionError:
+            messagebox.showerror("Error", "Cannot modify Excel file. Please close it in Excel and try again.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
+            
     def log_message(self, message):
+
         self.progress_text.config(state="normal")
         self.progress_text.insert("end", message + "\n")
         self.progress_text.see("end")
@@ -552,11 +617,18 @@ def write_to_excel_gui(pdf_data, excel_path, sheet_name, log_func):
                     # Use existing sheet
                     if sheet_name in wb.sheetnames:
                         ws = wb[sheet_name]
-                        # Collect existing filenames
-                        for row in range(2, ws.max_row + 1):
-                            filename = ws[f'A{row}'].value
-                            if filename:
-                                existing_files.add(filename)
+                        # Collect existing filenames by iterating only through cells with values
+                        # This completely ignores empty/deleted rows
+                        for row in ws.iter_rows(min_row=2, min_col=1, max_col=1):
+                            cell_value = row[0].value
+                            if cell_value and str(cell_value).strip():
+                                existing_files.add(cell_value)
+                        
+                        # Debug: Log what we found
+                        if existing_files:
+                            log_func(f"Found {len(existing_files)} existing file(s) in sheet")
+                        else:
+                            log_func("Sheet is empty, will add all files")
                     else:
                         ws = wb.create_sheet(sheet_name)
                 
